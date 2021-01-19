@@ -390,9 +390,8 @@ func (device *Device) Close() {
 	defer device.state.Unlock()
 
 	device.tun.device.Close()
-	device.BindClose()
 
-	device.isUp.Set(false)
+	device.setUpDownLocked(down)
 
 	// Remove peers before closing queues,
 	// because peers assume that queues are active.
