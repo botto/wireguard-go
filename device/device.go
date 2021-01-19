@@ -21,7 +21,7 @@ import (
 )
 
 type Device struct {
-	isUp     AtomicBool // device is (going) up
+	isUp     AtomicBool // isUp indicates whether the device is up
 	isClosed AtomicBool // device is closed? (acting as guard)
 	log      *Logger
 
@@ -31,7 +31,6 @@ type Device struct {
 		stopping sync.WaitGroup
 		sync.Mutex
 		changing AtomicBool
-		current  bool
 	}
 
 	net struct {
@@ -166,33 +165,40 @@ func unsafeRemovePeer(device *Device, peer *Peer, key NoisePublicKey) {
 	device.peers.empty.Set(len(device.peers.keyMap) == 0)
 }
 
-func deviceUpdateState(device *Device) {
+// upDown represents device state (up or down).
+type upDown bool
 
+const (
+	up   upDown = true
+	down upDown = false
+)
+
+// setUpDown attempts to change the device state to match want.
+func (device *Device) setUpDown(want upDown) {
 	// check if state already being updated (guard)
-
 	if device.state.changing.Swap(true) {
 		return
 	}
-
-	// compare to current state of device
+	defer device.state.changing.Set(false)
 
 	device.state.Lock()
+	defer device.state.Unlock()
 
-	newIsUp := device.isUp.Get()
-
-	if newIsUp == device.state.current {
-		device.state.changing.Set(false)
-		device.state.Unlock()
-		return
+	// Only update if this is a state change.
+	if bool(want) != device.isUp.Get() {
+		device.setUpDownLocked(want)
 	}
+}
 
-	// change state of device
-
-	switch newIsUp {
-	case true:
+// setUpDownLocked attempts to change the device state to match want.
+// The caller must hold device.state.mu.
+func (device *Device) setUpDownLocked(want upDown) {
+	failed := false
+	switch want {
+	case up:
 		if err := device.BindUpdate(); err != nil {
 			device.log.Errorf("Unable to update bind: %v", err)
-			device.isUp.Set(false)
+			failed = true
 			break
 		}
 		device.peers.RLock()
@@ -204,7 +210,7 @@ func deviceUpdateState(device *Device) {
 		}
 		device.peers.RUnlock()
 
-	case false:
+	case down:
 		device.BindClose()
 		device.peers.RLock()
 		for _, peer := range device.peers.keyMap {
@@ -213,32 +219,23 @@ func deviceUpdateState(device *Device) {
 		device.peers.RUnlock()
 	}
 
-	// update state variables
-
-	device.state.current = newIsUp
-	device.state.changing.Set(false)
-	device.state.Unlock()
-
-	// check for state change in the mean time
-
-	deviceUpdateState(device)
+	if failed {
+		device.setUpDownLocked(!want) // undo
+	} else {
+		device.isUp.Set(bool(want)) // record
+	}
 }
 
 func (device *Device) Up() {
-
 	// closed device cannot be brought up
-
 	if device.isClosed.Get() {
 		return
 	}
-
-	device.isUp.Set(true)
-	deviceUpdateState(device)
+	device.setUpDown(up)
 }
 
 func (device *Device) Down() {
-	device.isUp.Set(false)
-	deviceUpdateState(device)
+	device.setUpDown(down)
 }
 
 func (device *Device) IsUnderLoad() bool {
