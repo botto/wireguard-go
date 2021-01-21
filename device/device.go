@@ -184,8 +184,8 @@ func (device *Device) setUpDown(want upDown) {
 	device.state.Lock()
 	defer device.state.Unlock()
 
-	// Only update if this is a state change.
-	if bool(want) != device.isUp.Get() {
+	// Only update if the device is open and this is a state change.
+	if !device.isClosed.Get() && bool(want) != device.isUp.Get() {
 		device.setUpDownLocked(want)
 	}
 }
@@ -227,10 +227,6 @@ func (device *Device) setUpDownLocked(want upDown) {
 }
 
 func (device *Device) Up() {
-	// closed device cannot be brought up
-	if device.isClosed.Get() {
-		return
-	}
 	device.setUpDown(up)
 }
 
@@ -343,7 +339,7 @@ func NewDevice(tunDevice tun.Device, logger *Logger) *Device {
 		go device.RoutineHandshake()
 	}
 
-	device.state.stopping.Add(2)
+	device.state.stopping.Add(1) // read from TUN
 	go device.RoutineReadFromTUN()
 	go device.RoutineTUNEventReader()
 
