@@ -173,6 +173,13 @@ const (
 	down upDown = false
 )
 
+func (x upDown) String() string {
+	if x == up {
+		return "up"
+	}
+	return "down"
+}
+
 // setUpDown attempts to change the device state to match want.
 func (device *Device) setUpDown(want upDown) {
 	// check if state already being updated (guard)
@@ -222,6 +229,7 @@ func (device *Device) setUpDownLocked(want upDown) {
 	if failed {
 		device.setUpDownLocked(!want) // undo
 	} else {
+		device.log.Verbosef("Interface set %v", want)
 		device.isUp.Set(bool(want)) // record
 	}
 }
